@@ -1,0 +1,23 @@
+{
+  "common_sha256": "8f86bdc66fb413cb378306c1f55ea412a2ffa6dd963206df84f91c666c95e17d",
+  "harnesses": {
+    "claude": {
+      "instructions_sha256": "0e056e2e89fb89dd2ef62ff3c9773e2d42a84740c1198f53a98fd284c83280d4",
+      "event": "PreToolUse",
+      "config": "claude/.claude/settings.json",
+      "status": "generated, not installed into active workspace",
+      "full_harness_launch": "not established by generation"
+    },
+    "codex": {
+      "instructions_sha256": "905aca47f6a1a9752541447983e5b8391178a77de66946f153df526b9c31b631",
+      "event": "PostToolUse",
+      "config": "codex/.codex/hooks.json",
+      "status": "generated, not installed into active workspace",
+      "full_harness_launch": "not established by generation"
+    }
+  },
+  "unsupported": [
+    "Codex pre-write blocking is not established by observed configuration or CLI help",
+    "Shell writes and unrecognized tool payloads require explicit preflight"
+  ]
+}

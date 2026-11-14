@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "split": "development",
+  "cases": [
+    {"id":"report-complete","check":{"kind":"report","location":"reports/result.md","required_sections":["Findings","Evidence","Next action"]}},
+    {"id":"playbook-all-tests","check":{"kind":"playbook","tests":["normal","edge","regression"]}},
+    {"id":"investigation","check":{"kind":"investigation","root_cause":"synthetic stale reference"}}
+  ]
+}

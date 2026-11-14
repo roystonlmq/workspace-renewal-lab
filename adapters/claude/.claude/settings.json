@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./placement-hook.py --root . --harness claude",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

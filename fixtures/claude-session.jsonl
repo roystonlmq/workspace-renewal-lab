@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"synthetic-claude-history","uuid":"synthetic-c1","timestamp":"2026-11-14T10:00:00Z","message":{"content":"For the synthetic-a demo, prefer concise reports."}}
+{"type":"user","sessionId":"synthetic-claude-history","uuid":"synthetic-c2","timestamp":"2026-11-14T10:01:00Z","message":{"content":"/clear"}}
+{"type":"user","sessionId":"synthetic-claude-history","uuid":"synthetic-c3","timestamp":"2026-11-14T10:02:00Z","message":{"content":"Resume synthetic-a. Correction: use detailed evidence for investigation reports."}}

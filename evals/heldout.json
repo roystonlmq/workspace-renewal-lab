@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "split": "heldout",
+  "cases": [
+    {"id":"report-wrong-location","check":{"kind":"report","location":"reports/delivered.md","required_sections":["Conclusion","Source evidence","Action"]}},
+    {"id":"report-half-written","check":{"kind":"report","location":"reports/delivered.md","required_sections":["Conclusion","Source evidence","Action"]}},
+    {"id":"playbook-regression-missing","check":{"kind":"playbook","tests":["new-path","existing-path","timeout-recovery"]}},
+    {"id":"investigation-no-evidence","check":{"kind":"investigation","root_cause":"synthetic idempotency collision"}},
+    {"id":"protected-controls","test":"test_controls"},
+    {"id":"memory-lifecycle-isolation","test":"test_lifecycle"},
+    {"id":"placement-and-hook-invocation","test":"test_adapters"},
+    {"id":"archive-restore","test":"test_archive"},
+    {"id":"clear-resume","test":"test_ingestion"},
+    {"id":"nightly-due-report","test":"test_nightly"},
+    {"id":"private-destination","test":"test_notion"}
+  ]
+}

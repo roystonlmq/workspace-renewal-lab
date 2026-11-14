@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./placement-hook.py --root . --harness codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

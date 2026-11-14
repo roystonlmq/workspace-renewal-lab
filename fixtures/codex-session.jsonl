@@ -1,0 +1,4 @@
+{"type":"session_meta","timestamp":"2026-11-14T11:00:00Z","payload":{"id":"synthetic-codex-history"}}
+{"type":"response_item","timestamp":"2026-11-14T11:01:00Z","payload":{"id":"synthetic-x1","role":"user","content":[{"type":"input_text","text":"For synthetic-b, retain the evidence that the old schedule is obsolete."}]}}
+{"type":"event_msg","timestamp":"2026-11-14T11:02:00Z","payload":{"type":"context_reset"}}
+{"type":"response_item","timestamp":"2026-11-14T11:03:00Z","payload":{"id":"synthetic-x2","role":"user","content":[{"type":"input_text","text":"Resume synthetic-b. Restore the useful schedule context and ask before forgetting this theme again."}]}}
