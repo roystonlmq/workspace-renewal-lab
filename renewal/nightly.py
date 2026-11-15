@@ -78,7 +78,7 @@ class NightlyRunner:
     """
     def __init__(self, state_dir, ingestor: Ingestor, sink, activity_check, *,
                  improvement=None, memory_maintenance=None, report_sink=None, readiness=None, cost_summary=None,
-                 policy_expires_at=None, observation_report_due_at=None):
+                 policy_expires_at=None, observation_report_due_at=None, concurrent_observation=False):
         self.state_dir = Path(state_dir)
         self.ingestor = ingestor
         self.sink = sink
@@ -90,6 +90,7 @@ class NightlyRunner:
         self.cost_summary = cost_summary
         self.policy_expires_at = policy_expires_at
         self.observation_report_due_at = observation_report_due_at
+        self.concurrent_observation = concurrent_observation
 
     def tick(self, paths, *, now: datetime | None = None) -> dict:
         now = now or datetime.now(timezone.utc)
@@ -121,8 +122,11 @@ class NightlyRunner:
             activity = Activity()
         if not isinstance(activity, Activity) or activity.verified is not True:
             return dict(result, status='blocked_active_work_check')
-        if activity.idle is not True:
+        concurrent = activity.idle is not True
+        if concurrent and not self.concurrent_observation:
             return dict(result, status='deferred_active_work')
+        if concurrent:
+            result['blockers'].append('active_work_defers_maintenance_and_improvement')
         if (self.readiness.get('ingestion_tests') is not True or self.readiness.get('instrumentation') is not True
                 or self.readiness.get('operational_bindings', True) is not True):
             return dict(result, status='blocked_readiness')
@@ -180,7 +184,7 @@ class NightlyRunner:
                     result['pilot_status'] = 'completed'
             atomic_json(pilot_path, pilot)
             return dict(result, status='report_due')
-        fully_configured = self.improvement is not None and self.memory_maintenance is not None
+        fully_configured = not concurrent and self.improvement is not None and self.memory_maintenance is not None
         pilot['status'] = 'observing_partial' if partial else ('running' if fully_configured else 'running_partial')
         result['pilot_status'] = pilot['status']
         if self.memory_maintenance is None:
@@ -191,7 +195,9 @@ class NightlyRunner:
             processed_sessions=0, batches=0, failures=0, improvement_attempted=False,
             improvement_status='not_attempted', backlog=False, observed_at=now.isoformat(),
             maintenance_attempted=False, maintenance_status='not_attempted', fully_configured=fully_configured))
-        if not day.get('maintenance_attempted', False):
+        if not day.get('maintenance_attempted', False) and concurrent:
+            day['maintenance_status'] = 'deferred_active_work'
+        elif not day.get('maintenance_attempted', False):
             if self.memory_maintenance is None:
                 day['maintenance_status'] = 'blocked_maintenance'
             else:
@@ -223,7 +229,9 @@ class NightlyRunner:
             day['failures'] += len(ingested['failures'])
             day['backlog'] = ingested['backlog']
             atomic_json(pilot_path, pilot)
-        if not day['improvement_attempted']:
+        if not day['improvement_attempted'] and concurrent:
+            day['improvement_status'] = 'deferred_active_work'
+        elif not day['improvement_attempted']:
             if self.improvement is None:
                 day['improvement_status'] = 'blocked_unconfigured'
             else:
@@ -268,7 +276,7 @@ class NightlyRunner:
             rollbacks=statuses.count('rolled_back'), backlog_days=sum(bool(d['backlog']) for d in days),
             memory_maintenance_completed=sum(d.get('maintenance_status') in {'completed', 'no_change'} for d in days),
             maintenance_backlog_days=sum(d.get('maintenance_status') not in {'completed', 'no_change'} for d in days),
-            improvement_backlog_days=sum(d.get('improvement_status') in {'blocked_unconfigured', 'blocked', 'failed', 'reserved', 'invalid_result'} for d in days),
+            improvement_backlog_days=sum(d.get('improvement_status') in {'blocked_unconfigured', 'blocked', 'failed', 'reserved', 'invalid_result', 'deferred_active_work'} for d in days),
             costs=costs, average_observed_day_cost=total / len(days) if isinstance(total, (int, float)) and days else None,
             recommended_ongoing_budget=None,
             budget_status='OPEN - requires comparable accepted outcomes and complete cost evidence',
@@ -327,6 +335,20 @@ def build_configured_runner(config: dict, *, activity_check=None) -> NightlyRunn
     state_dir = Path(config['state_dir'])
     if not state_dir.is_absolute():
         raise ValueError('absolute operational state directory required')
+    concurrent = config.get('concurrent_observation', {}).get('enabled') is True
+    if concurrent:
+        from renewal.runtime import scoped_paths
+        # Concurrent mode is confined to the reviewed internal connector and
+        # immutable explicit sources. It never relaxes shared mutation gates.
+        sources = config.get('sources', [])
+        routes = config.get('notion', {}).get('session_routes', {})
+        if (config.get('connector_factory') != 'renewal.runtime:create'
+                or not sources or config.get('source_roots')
+                or len(list(scoped_paths(config))) != len(sources)
+                or not routes or any(r.get('namespace') != 'personal'
+                    or r.get('scope') != 'workspace-renewal-internal' for r in routes.values())
+                or config.get('observation', {}).get('enabled') is not True):
+            raise ValueError('Concurrent observation requires pinned internal-only sources and partial mode')
     connectors = {}
     factory = config.get('connector_factory')
     if factory:
@@ -350,6 +372,7 @@ def build_configured_runner(config: dict, *, activity_check=None) -> NightlyRunn
         memory_maintenance=connectors.get('memory_maintenance'),
         cost_summary=cost_summary, readiness=config.get('readiness'),
         policy_expires_at=config.get('notion', {}).get('pilot_access', {}).get('expires_at'),
+        concurrent_observation=concurrent,
         observation_report_due_at=config.get('observation', {}).get('report_due_at')
             if config.get('observation', {}).get('enabled') is True else None)
 

@@ -35,6 +35,42 @@ class PrivateReport:
 
 
 class NightlyTests(unittest.TestCase):
+    def test_concurrent_observation_ingests_closed_sources_and_defers_mutations(self):
+        calls=[]
+        self.activity=lambda:Activity(verified=True,idle=False,
+            active_sessions=frozenset({'session-0','unrelated-active'}))
+        runner=self.runner(concurrent_observation=True,
+            observation_report_due_at=(NOW+timedelta(days=2)).isoformat(),
+            policy_expires_at=(NOW+timedelta(days=3)).isoformat(),
+            memory_maintenance=lambda:calls.append('maintenance') or {'status':'no_change'},
+            improvement=lambda:calls.append('improvement') or {'status':'no_candidate'})
+        first=runner.tick(self.paths[:2],now=NOW)
+        self.assertEqual(first['status'],'ran')
+        self.assertEqual(first['processed_sessions'],1)
+        self.assertEqual(first['maintenance_status'],'deferred_active_work')
+        self.assertEqual(first['improvement_status'],'deferred_active_work')
+        self.assertEqual(calls,[])
+        pilot=json.loads((self.root/'runtime/observation.json').read_text())
+        day=next(iter(pilot['days'].values()))
+        self.assertFalse(day['maintenance_attempted'])
+        self.assertFalse(day['improvement_attempted'])
+        self.assertFalse(day['fully_configured'])
+        runner.activity_check=lambda:Activity(verified=True,idle=True)
+        later=runner.tick(self.paths[:2],now=NOW+timedelta(minutes=5))
+        self.assertEqual(calls,['maintenance','improvement'])
+        self.assertEqual(later['processed_sessions'],1)
+
+    def test_concurrent_observation_still_requires_verified_metadata(self):
+        self.activity=lambda:Activity()
+        runner=self.runner(concurrent_observation=True)
+        self.assertEqual(runner.tick(self.paths[:1],now=NOW)['status'],'blocked_active_work_check')
+        self.assertFalse((self.root/'runtime/pilot.json').exists())
+
+    def test_configured_concurrency_rejects_unpinned_sources(self):
+        with self.assertRaisesRegex(ValueError,'pinned internal-only'):
+            build_configured_runner(dict(state_dir=str(self.root/'runtime'),
+                concurrent_observation={'enabled':True},sources=[]))
+
     def test_unfinished_operational_bindings_prevent_observation_start(self):
         runner = self.runner(observation_report_due_at=(NOW + timedelta(days=2)).isoformat(),
             policy_expires_at=(NOW + timedelta(days=3)).isoformat())
