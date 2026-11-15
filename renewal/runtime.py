@@ -80,7 +80,7 @@ def maintenance(store, scopes):
     return run
 
 
-def create(config):
+def create(config, *, activity_check=None):
     notion = config['notion']
     store = NotionStore(notion,NtnTransport(notion))
     eligible = {digest(str(p.resolve())) for p in scoped_paths(config)}
@@ -109,8 +109,13 @@ def create(config):
             result, receipt = run(state/'protected')
             atomic_json(state/'protected-latest.json',dict(status=result['status'],receipt=str(receipt)))
             return result['status']=='passed'
+        def active():
+            # An owned foreground caller can supply the same verified metadata
+            # probe used by its runner. Scheduled callers keep the idle probe.
+            activity = (activity_check or probe)()
+            return activity.verified is not True or activity.idle is not True
         pipeline = ImprovementPipeline(gate=ChangeGate(root,state/'rollback',
-            active=lambda: not probe().idle),state_dir=state/'improvements',
+            active=active),state_dir=state/'improvements',
             targets=[target],protected_evals=(Path(__file__).resolve().parents[1]/'evals',
                 Path(__file__).resolve().parents[1]/'evals/freeze.json'),
             checks=checks,postcheck=lambda p:p.read_text()==content,
