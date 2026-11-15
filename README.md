@@ -89,6 +89,54 @@ for the reproducible comparison protocol.
 
 No LinkedIn post or external message is sent by this project.
 
+## Scoped live graph
+
+`renewal.graph.GraphStore` reads node and edge metadata directly through `ntn`.
+Use a private configuration containing the existing `notion` policy and a `graph`
+object with `nodes_database_id`, `nodes_data_source_id`, `edges_database_id`,
+`edges_data_source_id` and `home_page_id`. Each database must be a direct child of
+the policy's approved setup page. The same fixed privacy window applies. Strict
+ACL mode still requires an independent live verifier, supplied by integration code.
+
+```sh
+python3 -m renewal.graph_cli --config /path/to/private-config.json --namespace work --scope synthetic-demo recall --query "decision" --budget-chars 4000
+python3 -m renewal.graph_cli --config /path/to/private-config.json --namespace work --scope synthetic-demo inspect --node synthetic-project --hops 2
+```
+
+The CLI queries exact namespace and scope on every request, follows
+incoming and outgoing relations for at most two hops and forty nodes, and preserves
+historical and assumed statuses in evidence paths. Recovery and superseded records
+require explicit inclusion. Scope scans paginate with bounded pages and record
+counts, failing closed when exceeded. Defaults are ten pages, two hundred nodes and
+four hundred edges. Every endpoint must be present in the same verified data source
+and scope. Queries inspect properties only, with no page bodies or local content
+cache. A character budget may omit whole result paths; `omitted_for_budget` reports
+this explicitly. Authentication, policy or privacy failure returns an error with no
+stale fallback.
+
+Reviewed maintenance is explicit, with no automatic fact extraction. `remember`
+requires a stable slug, node type, summary file, owner and evidence source. `link`
+requires a stable slug, directed endpoints, typed relation and evidence source.
+Both commands require `--reviewed`. Status defaults to `assumed`; pass `current`
+and a verification date only when supported by reviewed evidence.
+
+```sh
+python3 -m renewal.graph_cli --config /path/to/private-config.json --namespace work --scope synthetic-demo remember --id decision-demo --name "Reviewed decision" --type decision --summary-file /path/to/reviewed-summary.txt --owner fixture --source synthetic/decision.md --reviewed
+python3 -m renewal.graph_cli --config /path/to/private-config.json --namespace work --scope synthetic-demo link --id project-decision --name "Project documents decision" --from-node synthetic-project --to-node decision-demo --relation documents --source synthetic/decision.md --reviewed
+```
+
+Writes preserve existing stable identities, node types, edge endpoints and relation
+types. Endpoint identity and eligibility are checked within the same exact scope.
+Duplicate identities and changed readback fail closed. No policy window is renewed.
+Notion may briefly omit a new page from scoped queries after creation. Only a missing
+target triggers up to two readback retries, after one and two seconds. Each retry
+rechecks the existing privacy policy. The mutation is never resent. Mismatches,
+duplicates, changed identities and privacy errors fail immediately. A persistently
+missing target fails with an explicit review requirement before another write.
+Serialize writes per scope: Notion has no unique constraints or compare-and-swap.
+Concurrent duplicate creation is detected during readback, requiring explicit review
+before retrying. This code never deletes or reconciles conflicting records itself.
+
 The trusted `renewal.runtime:create` connector accepts byte-pinned source receipts,
 explicit namespace and scope routes, and reviewed canonical facts. It handles Claude
 and Codex message schemas without copying arbitrary transcript text. Changed sources
