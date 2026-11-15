@@ -37,3 +37,26 @@ class ActivityTests(unittest.TestCase):
 
     def test_missing_inventory_is_not_idle(self):
         self.assertFalse(classify(900,None,[]).verified)
+
+    def test_foreground_worker_is_excluded_only_when_present_and_active(self):
+        rows = [{'id':'self','status':{'type':'active'}}]
+        value = classify(0, [], rows, foreground_worker='self')
+        self.assertTrue(value.verified)
+        self.assertTrue(value.idle)
+        self.assertIn('self', value.active_sessions)
+        self.assertFalse(classify(0, [], rows).idle)
+        self.assertFalse(classify(900, [], rows, foreground_worker='foreign').verified)
+        self.assertFalse(classify(900, [], [{'id':'self','status':'idle'}], foreground_worker='self').verified)
+
+    def test_foreground_exemption_never_excludes_competing_work(self):
+        rows = [{'id':'self','status':'active'}, {'id':'other','status':'active'}]
+        self.assertFalse(classify(900, [], rows, foreground_worker='self').idle)
+
+    def test_owned_foreground_root_requires_disjoint_verified_roots(self):
+        rows = [{'id':'self','status':'active','cwd':'/work/renewal'},
+                {'id':'other','status':'active','cwd':'/other/project'}]
+        self.assertTrue(classify(0, [], rows, foreground_worker='self', foreground_root='/work/renewal').idle)
+        for cwd in [None, '/work', '/work/renewal/child']:
+            rows[1]['cwd'] = cwd
+            self.assertFalse(classify(0, [], rows, foreground_worker='self', foreground_root='/work/renewal').idle)
+        self.assertFalse(classify(0, [], rows, foreground_worker='self', foreground_root='/unowned').verified)

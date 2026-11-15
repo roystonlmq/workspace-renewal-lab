@@ -103,3 +103,19 @@ interface after Codex upgrades. The scheduler inherits the installation PATH and
 runs every five minutes while awake; the runner enforces the Singapore due time.
 Registration, invocation, useful work and a running pilot are separate observations.
 A full pilot cannot start unless its report precedes the configured policy expiry.
+
+Both harnesses can call `python3 -m renewal.memory_cli --config <private-config>
+--namespace personal --scope <explicit-scope> recall --query <query>`. The same
+entry point supports reviewed writes, corrections and explicit recovery. It does
+not replace either harness's authoritative memory or install native hooks.
+
+For the real workspace, placement mode `workspace` preserves a frozen list of
+legacy paths, rejects new loose root artifacts and redirects registered customer
+documents into their project namespaces. Claude returns a pre-tool denial;
+Codex returns post-tool feedback. A post-tool hook cannot prevent a write.
+
+An explicitly configured `observation.enabled` and `observation.report_due_at`
+can collect a partial observation before policy expiry. It uses separate state,
+never reports a full fourteen-day measurement and cannot reset an existing
+measurement's daily quotas. Set `readiness.operational_bindings` to false until
+the real runtime consumers and native adapter behavior are verified.

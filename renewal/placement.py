@@ -11,6 +11,34 @@ import sys
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
+def workspace_check(root: Path, path: str, customers: set[str], existing_paths=None) -> dict:
+    """Check only unambiguous new placement mistakes, preserving existing files."""
+    root = root.resolve()
+    target = (root / path).resolve()
+    if not target.is_relative_to(root):
+        return {'allowed': False, 'reason': 'Write is outside this workspace', 'suggestion': 'Use the owning repository'}
+    relative = target.relative_to(root)
+    parts = relative.parts
+    if (str(relative) in existing_paths if existing_paths is not None else target.exists()):
+        return {'allowed': True}
+    if len(parts) >= 3 and parts[0] == 'docs' and parts[1] in customers:
+        return {'allowed': False, 'reason': 'New customer artifacts need a project namespace',
+                'suggestion': str(Path('customers') / parts[1] / '<project>' / Path(*parts[2:]))}
+    if len(parts) == 1 and not relative.name.startswith('.'):
+        return {'allowed': False, 'reason': 'New loose workspace artifacts need an owning folder',
+                'suggestion': 'docs/<topic>/ or the owning source repository'}
+    return {'allowed': True}
+
+
+def registered_customers(root):
+    registry = root / 'customers/registry.json'
+    customers = set()
+    if registry.is_file():
+        for row in json.loads(registry.read_text()).get('projects', []):
+            customers.update([row['customer'], *row.get('aliases', [])])
+    return customers
+
+
 def check(root: Path, path: str, kind: str = "shared", customer: str | None = None,
           project: str | None = None, owning_repo: str | None = None) -> dict:
     root = root.resolve()
@@ -60,14 +88,17 @@ def paths_from_payload(payload: dict) -> list[str]:
 
 
 def invoke_hook(payload: dict, root: Path, harness: str, scope: dict) -> tuple[int, dict | None]:
+    workspace = scope.get('kind') == 'workspace'
+    customers = registered_customers(root) if workspace else set()
+    exceptions = scope.get('existing_paths')
     violations = [r for path in paths_from_payload(payload)
-                  if not (r := check(root, path, **scope))["allowed"]]
+                  if not (r := (workspace_check(root, path, customers, exceptions) if workspace else check(root, path, **scope)))["allowed"]]
     if not violations:
         return 0, None
     reason = "; ".join(v["reason"] + ". Use " + v["suggestion"] for v in violations)
     if harness == "claude":
         return 0, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
-    return 0, {"additionalContext": "Placement correction needed: " + reason,
+    return 0, {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "Placement correction needed: " + reason},
                "enforcement": "post-write feedback, not prevention"}
 
 
@@ -75,13 +106,18 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--harness", choices=["claude", "codex"])
-    p.add_argument("--kind", choices=["shared", "customer", "scratch", "code"], default="shared")
+    p.add_argument("--kind", choices=["shared", "customer", "scratch", "code", "workspace"], default="shared")
     p.add_argument("--customer")
     p.add_argument("--project")
     p.add_argument("--owning-repo")
+    p.add_argument('--exceptions-file', type=Path, help='Frozen legacy paths, required for meaningful post-write checks')
     p.add_argument("paths", nargs="*")
     a = p.parse_args()
     scope = {"kind": a.kind, "customer": a.customer, "project": a.project, "owning_repo": a.owning_repo}
+    if a.exceptions_file:
+        if a.kind != 'workspace':
+            p.error('exceptions-file requires workspace kind')
+        scope['existing_paths'] = set(json.loads(a.exceptions_file.read_text())['paths'])
     if a.harness:
         try:
             payload = json.load(sys.stdin)
@@ -94,7 +130,8 @@ def main():
         if output:
             print(json.dumps(output))
         return code
-    results = [check(a.root, path, **scope) for path in a.paths]
+    results = [workspace_check(a.root, path, registered_customers(a.root), scope.get('existing_paths'))
+               if a.kind == 'workspace' else check(a.root, path, **scope) for path in a.paths]
     violations = [r for r in results if not r["allowed"]]
     if violations:
         print(json.dumps(violations))

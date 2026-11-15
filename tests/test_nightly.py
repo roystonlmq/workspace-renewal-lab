@@ -35,6 +35,13 @@ class PrivateReport:
 
 
 class NightlyTests(unittest.TestCase):
+    def test_unfinished_operational_bindings_prevent_observation_start(self):
+        runner = self.runner(observation_report_due_at=(NOW + timedelta(days=2)).isoformat(),
+            policy_expires_at=(NOW + timedelta(days=3)).isoformat())
+        runner.readiness['operational_bindings'] = False
+        self.assertEqual(runner.tick([], now=NOW)['status'], 'blocked_readiness')
+        self.assertFalse((self.root/'runtime/observation.json').exists())
+
     def test_direct_scheduler_entrypoint_accepts_metadata_activity_type(self):
         import os
         factory=self.root/'direct_factory.py'
@@ -63,6 +70,30 @@ class NightlyTests(unittest.TestCase):
         result = runner.tick([], now=NOW)
         self.assertEqual(result['status'], 'blocked_policy_window')
         self.assertFalse((self.root/'runtime/pilot.json').exists())
+
+    def test_explicit_partial_observation_has_separate_state_and_report(self):
+        reports = []
+        due = NOW + timedelta(days=2)
+        runner = self.runner(policy_expires_at=(due + timedelta(hours=1)).isoformat(),
+            observation_report_due_at=due.isoformat(),
+            memory_maintenance=lambda: {'status': 'no_change'},
+            improvement=lambda: {'status': 'no_candidate'},
+            report_sink=PrivateReport(lambda r: reports.append(r) or True))
+        result = runner.tick(self.paths[:1], now=NOW)
+        self.assertEqual(result['pilot_status'], 'observing_partial')
+        self.assertEqual(result['processed_sessions'], 1)
+        self.assertFalse((self.root/'runtime/pilot.json').exists())
+        self.assertTrue((self.root/'runtime/observation.json').exists())
+        self.assertEqual(runner.tick([], now=due)['report_status'], 'delivered')
+        self.assertEqual(reports[0]['measurement_kind'], 'partial_observation')
+        self.assertFalse(reports[0]['full_measurement_14_days'])
+
+    def test_partial_observation_cannot_outlive_policy(self):
+        due = NOW + timedelta(days=2)
+        runner = self.runner(policy_expires_at=due.isoformat(),
+            observation_report_due_at=due.isoformat())
+        self.assertEqual(runner.tick([], now=NOW)['status'], 'blocked_policy_window')
+        self.assertFalse((self.root/'runtime/observation.json').exists())
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

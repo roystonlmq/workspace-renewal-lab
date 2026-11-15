@@ -9,6 +9,12 @@ from renewal.experiment import Ledger
 
 
 class HarnessTest(unittest.TestCase):
+    def test_claude_single_observed_model_is_preserved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            event = {'type':'result','usage':{'input_tokens':2}, 'modelUsage':{'fixture-model':{'inputTokens':2}}, 'total_cost_usd':0.01}
+            row = execute([sys.executable, '-c', 'print('+repr(json.dumps(event))+')'], cwd=folder,
+                          prompt='synthetic', metadata={}, ledger=Ledger(Path(folder)/'calls'), output=Path(folder)/'logs')
+            self.assertEqual(row['observed_model'], 'fixture-model')
     def test_usage_and_failures_are_persisted(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)

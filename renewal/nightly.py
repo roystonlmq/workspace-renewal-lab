@@ -78,7 +78,7 @@ class NightlyRunner:
     """
     def __init__(self, state_dir, ingestor: Ingestor, sink, activity_check, *,
                  improvement=None, memory_maintenance=None, report_sink=None, readiness=None, cost_summary=None,
-                 policy_expires_at=None):
+                 policy_expires_at=None, observation_report_due_at=None):
         self.state_dir = Path(state_dir)
         self.ingestor = ingestor
         self.sink = sink
@@ -89,6 +89,7 @@ class NightlyRunner:
         self.readiness = readiness or {}
         self.cost_summary = cost_summary
         self.policy_expires_at = policy_expires_at
+        self.observation_report_due_at = observation_report_due_at
 
     def tick(self, paths, *, now: datetime | None = None) -> dict:
         now = now or datetime.now(timezone.utc)
@@ -122,9 +123,14 @@ class NightlyRunner:
             return dict(result, status='blocked_active_work_check')
         if activity.idle is not True:
             return dict(result, status='deferred_active_work')
-        if self.readiness.get('ingestion_tests') is not True or self.readiness.get('instrumentation') is not True:
+        if (self.readiness.get('ingestion_tests') is not True or self.readiness.get('instrumentation') is not True
+                or self.readiness.get('operational_bindings', True) is not True):
             return dict(result, status='blocked_readiness')
-        pilot_path = self.state_dir / 'pilot.json'
+        partial = self.observation_report_due_at is not None
+        pilot_path = self.state_dir / ('observation.json' if partial else 'pilot.json')
+        other_path = self.state_dir / ('pilot.json' if partial else 'observation.json')
+        if other_path.exists():
+            return dict(result, status='blocked_measurement_mode_change')
         pilot = load_json(pilot_path)
         local = now.astimezone(SGT)
         day_key = local.date().isoformat()
@@ -133,10 +139,14 @@ class NightlyRunner:
             if not pilot or yesterday in pilot.get('days', {}):
                 return dict(result, status='not_due')
         if not pilot:
-            if self.policy_expires_at and now + timedelta(days=14) >= datetime.fromisoformat(self.policy_expires_at):
+            due = datetime.fromisoformat(self.observation_report_due_at) if partial else now + timedelta(days=14)
+            if (due.tzinfo is None or due <= now or due > now + timedelta(days=14)
+                    or (partial and not self.policy_expires_at)
+                    or (self.policy_expires_at and due >= datetime.fromisoformat(self.policy_expires_at))):
                 return dict(result, status='blocked_policy_window', blockers=['policy_expires_before_full_report'])
             pilot = dict(version=1, started_at=now.isoformat(),
-                         report_due_at=(now + timedelta(days=14)).isoformat(),
+                         report_due_at=due.isoformat(),
+                         measurement_kind='partial_observation' if partial else 'full_pilot',
                          status='running_partial', days={}, report_delivered_at=None)
             atomic_json(pilot_path, pilot)
         if pilot.get('version') != 1 or not isinstance(pilot.get('days'), dict):
@@ -171,7 +181,7 @@ class NightlyRunner:
             atomic_json(pilot_path, pilot)
             return dict(result, status='report_due')
         fully_configured = self.improvement is not None and self.memory_maintenance is not None
-        pilot['status'] = 'running' if fully_configured else 'running_partial'
+        pilot['status'] = 'observing_partial' if partial else ('running' if fully_configured else 'running_partial')
         result['pilot_status'] = pilot['status']
         if self.memory_maintenance is None:
             result['blockers'].append('blocked_maintenance')
@@ -245,11 +255,12 @@ class NightlyRunner:
         total = costs.get('actual_charges') if isinstance(costs, dict) else None
         statuses = [d['improvement_status'] for d in days]
         return dict(kind='workspace-renewal-pilot-report',
+            measurement_kind=pilot.get('measurement_kind', 'full_pilot'),
             idempotency_key='pilot-report:' + pilot['started_at'],
             started_at=pilot['started_at'], due_at=pilot['report_due_at'], generated_at=now.isoformat(),
-            observed_days=len(days), measured_14_days=len(days) >= 14,
+            observed_days=len(days), measured_14_days=pilot.get('measurement_kind') != 'partial_observation' and len(days) >= 14,
             fully_configured_days=sum(bool(d.get('fully_configured')) for d in days),
-            full_measurement_14_days=sum(bool(d.get('fully_configured')) for d in days) >= 14,
+            full_measurement_14_days=pilot.get('measurement_kind') != 'partial_observation' and sum(bool(d.get('fully_configured')) for d in days) >= 14,
             completed_outcomes=sum(d['processed_sessions'] for d in days),
             attempted_sessions=sum(len(d['attempted_sessions']) for d in days),
             failed_batches=sum(d['failures'] for d in days),
@@ -338,7 +349,9 @@ def build_configured_runner(config: dict, *, activity_check=None) -> NightlyRunn
         improvement=connectors.get('improvement'), report_sink=connectors.get('report_sink'),
         memory_maintenance=connectors.get('memory_maintenance'),
         cost_summary=cost_summary, readiness=config.get('readiness'),
-        policy_expires_at=config.get('notion', {}).get('pilot_access', {}).get('expires_at'))
+        policy_expires_at=config.get('notion', {}).get('pilot_access', {}).get('expires_at'),
+        observation_report_due_at=config.get('observation', {}).get('report_due_at')
+            if config.get('observation', {}).get('enabled') is True else None)
 
 
 def _source_paths(config):

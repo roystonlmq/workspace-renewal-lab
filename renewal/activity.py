@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 
-def classify(idle_seconds, claude, codex, threshold=600):
+def classify(idle_seconds, claude, codex, threshold=600, *, foreground_worker=None, foreground_root=None):
     from .nightly import Activity
     if claude is None or codex is None:
         return Activity()
@@ -26,7 +26,26 @@ def classify(idle_seconds, claude, codex, threshold=600):
                 if not row.get(id_key):
                     return Activity()
                 active.add(row[id_key])
-    return Activity(verified=True,idle=idle_seconds>=threshold and not active,
+    competing = active
+    if foreground_worker is not None:
+        if not any(r.get('id') == foreground_worker and
+                   (r.get('status', {}).get('type') if isinstance(r.get('status'), dict)
+                    else r.get('status')) == 'active' for r in codex):
+            return Activity()
+        competing = active - {foreground_worker}
+        if foreground_root is not None:
+            root = Path(foreground_root).resolve()
+            own = next(r for r in codex if r.get('id') == foreground_worker)
+            if not own.get('cwd') or Path(own['cwd']).resolve() != root:
+                return Activity()
+            for rows, key in ((claude, 'sessionId'), (codex, 'id')):
+                for row in rows:
+                    if row.get(key) not in competing or not row.get('cwd'):
+                        continue
+                    other = Path(row['cwd']).resolve()
+                    if not root.is_relative_to(other) and not other.is_relative_to(root):
+                        competing = competing - {row[key]}
+    return Activity(verified=True,idle=(foreground_worker is not None or idle_seconds>=threshold) and not competing,
                     active_sessions=frozenset(active))
 
 
@@ -133,15 +152,17 @@ def codex_metadata():
         result=[]
         for sid in ids:
             thread=client.request('thread/read',dict(threadId=sid,includeTurns=False))['thread']
-            result.append(dict(id=thread['id'],status=thread['status']))
+            result.append(dict(id=thread['id'],status=thread['status'],cwd=thread.get('cwd')))
         return result
     finally:
         client.close()
 
 
-def probe(threshold=600):
+def probe(threshold=600, *, foreground_worker=None, foreground_root=None):
     from .nightly import Activity
     try:
+        if foreground_worker is not None and foreground_worker != os.environ.get('CODEX_THREAD_ID'):
+            return Activity()
         output=subprocess.run(['/usr/sbin/ioreg','-c','IOHIDSystem'],
             capture_output=True,text=True,timeout=10,check=True).stdout
         matches=re.findall(r'HIDIdleTime[\"\s]*=\s*(\d+)',output)
@@ -160,7 +181,8 @@ def probe(threshold=600):
                 env=dict(os.environ,TZ='UTC',LC_ALL='C')).stdout.strip()
             if started != row.get('procStart'):
                 return Activity()
-            claude.append({k:row[k] for k in ('sessionId','status')})
-        return classify(idle,claude,codex_metadata(),threshold)
+            claude.append({k:row.get(k) for k in ('sessionId','status','cwd')})
+        return classify(idle,claude,codex_metadata(),threshold,foreground_worker=foreground_worker,
+                        foreground_root=foreground_root)
     except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
         return Activity()

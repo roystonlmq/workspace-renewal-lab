@@ -52,6 +52,11 @@ def execute(command, *, cwd, prompt, metadata, ledger, output, timeout=90):
         elif event.get('type')=='result' and isinstance(usage,dict):
             row['usage']=usage
             row['provider_reported_cost_usd']=event.get('total_cost_usd')
+            models = event.get('modelUsage', {})
+            if isinstance(models, dict) and len(models) == 1:
+                row['observed_model'] = next(iter(models))
+            elif isinstance(models, dict) and models:
+                row['observed_models'] = sorted(models)
         if event.get('model'):
             row['observed_model']=event['model']
     row['elapsed_seconds']=time.monotonic()-started
