@@ -21,6 +21,10 @@ else:  # Direct executable entrypoint used by launchd, independent of cwd.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from renewal.ingestion import Ingestor, atomic_json, load_json
 
+# Metadata callbacks must share Activity's identity under both executable forms.
+if __name__ == '__main__':
+    sys.modules['renewal.nightly'] = sys.modules[__name__]
+
 
 SGT = ZoneInfo('Asia/Singapore')
 
@@ -73,7 +77,8 @@ class NightlyRunner:
     Its daily attempt is durably reserved before invoking it, including crashes.
     """
     def __init__(self, state_dir, ingestor: Ingestor, sink, activity_check, *,
-                 improvement=None, memory_maintenance=None, report_sink=None, readiness=None, cost_summary=None):
+                 improvement=None, memory_maintenance=None, report_sink=None, readiness=None, cost_summary=None,
+                 policy_expires_at=None):
         self.state_dir = Path(state_dir)
         self.ingestor = ingestor
         self.sink = sink
@@ -83,6 +88,7 @@ class NightlyRunner:
         self.report_sink = report_sink
         self.readiness = readiness or {}
         self.cost_summary = cost_summary
+        self.policy_expires_at = policy_expires_at
 
     def tick(self, paths, *, now: datetime | None = None) -> dict:
         now = now or datetime.now(timezone.utc)
@@ -127,6 +133,8 @@ class NightlyRunner:
             if not pilot or yesterday in pilot.get('days', {}):
                 return dict(result, status='not_due')
         if not pilot:
+            if self.policy_expires_at and now + timedelta(days=14) >= datetime.fromisoformat(self.policy_expires_at):
+                return dict(result, status='blocked_policy_window', blockers=['policy_expires_before_full_report'])
             pilot = dict(version=1, started_at=now.isoformat(),
                          report_due_at=(now + timedelta(days=14)).isoformat(),
                          status='running_partial', days={}, report_delivered_at=None)
@@ -267,6 +275,7 @@ def launchd_template(python_executable: str, entrypoint: str, arguments=()) -> b
         raise ValueError('absolute executable and entrypoint required')
     return plistlib.dumps(dict(Label='local.workspace-renewal.nightly',
         ProgramArguments=[python_executable, entrypoint, *arguments],
+        EnvironmentVariables={'PATH': os.environ.get('PATH', os.defpath)},
         StartInterval=300, RunAtLoad=True, ProcessType='Background',
         ThrottleInterval=300))
 
@@ -321,14 +330,22 @@ def build_configured_runner(config: dict, *, activity_check=None) -> NightlyRunn
         else:
             from renewal.accounting import create
         cost_summary = create(config)
+    if activity_check is None and config.get('activity_mode') == 'harness_metadata':
+        from renewal.activity import probe
+        activity_check = probe
     return NightlyRunner(state_dir, Ingestor(state_dir / 'ingestion.json'),
         connectors.get('sink'), activity_check or LocalActivityCheck(),
         improvement=connectors.get('improvement'), report_sink=connectors.get('report_sink'),
         memory_maintenance=connectors.get('memory_maintenance'),
-        cost_summary=cost_summary, readiness=config.get('readiness'))
+        cost_summary=cost_summary, readiness=config.get('readiness'),
+        policy_expires_at=config.get('notion', {}).get('pilot_access', {}).get('expires_at'))
 
 
 def _source_paths(config):
+    if 'sources' in config:
+        from renewal.runtime import scoped_paths
+        yield from scoped_paths(config)
+        return
     roots = config.get('source_roots', [str(Path.home() / '.claude' / 'projects'),
                                        str(Path.home() / '.codex' / 'sessions')])
     for root in roots:
@@ -388,7 +405,9 @@ def main(argv=None):
             result['enabled'] = result['status'] == 'registered'
         atomic_json(state_dir / 'scheduler.json', result)
         return 0 if result['enabled'] else 2
+    invoked_at = datetime.now(timezone.utc).isoformat()
     result = runner.tick(_source_paths(config))
+    result.update(invoked_at=invoked_at, finished_at=datetime.now(timezone.utc).isoformat())
     atomic_json(state_dir / 'last-run.json', result)
     return 0 if result['status'] in {'ran', 'not_due', 'report_due', 'pilot_completed', 'locked', 'deferred_active_work'} else 2
 

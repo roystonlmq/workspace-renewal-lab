@@ -35,6 +35,35 @@ class PrivateReport:
 
 
 class NightlyTests(unittest.TestCase):
+    def test_direct_scheduler_entrypoint_accepts_metadata_activity_type(self):
+        import os
+        factory=self.root/'direct_factory.py'
+        factory.write_text('from renewal.nightly import Activity\n'
+            'import renewal.activity\n'
+            'class Sink:\n    verified_private=True\n'
+            'def create(config):\n'
+            '    renewal.activity.probe=lambda:Activity(verified=True,idle=False)\n'
+            '    return dict(sink=Sink())\n')
+        config=self.root/'config.json'
+        config.write_text(json.dumps(dict(state_dir=str(self.root/'state'),source_roots=[],
+            connector_factory='direct_factory:create',activity_mode='harness_metadata')))
+        entry=Path(__file__).resolve().parents[1]/'renewal/nightly.py'
+        for executable in ([sys.executable,str(entry)], [sys.executable,'-m','renewal.nightly']):
+            with self.subTest(executable=executable):
+                result=subprocess.run([*executable,'tick','--config',str(config)],
+                    capture_output=True,text=True,cwd=entry.parents[1],
+                    env=dict(os.environ,PYTHONPATH=os.pathsep.join([str(self.root),str(entry.parents[1])])))
+                self.assertEqual(result.returncode,0,result.stderr)
+                row=json.loads((self.root/'state/last-run.json').read_text())
+                self.assertEqual(row['status'],'deferred_active_work')
+                self.assertIn('invoked_at',row)
+
+    def test_policy_window_must_cover_due_report_before_start(self):
+        runner = self.runner(policy_expires_at=(NOW + timedelta(days=14)).isoformat())
+        result = runner.tick([], now=NOW)
+        self.assertEqual(result['status'], 'blocked_policy_window')
+        self.assertFalse((self.root/'runtime/pilot.json').exists())
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

@@ -41,8 +41,10 @@ spend claims. The reader never adds prices or treats unknown billing as zero.
 
 The private Notion transport requires your own credentials and fresh, complete ACL
 evidence. A null public URL is insufficient. No production local memory cache exists.
-The supplied factory stays disabled until a supported independent live ACL provider
-is wired in. A configuration flag cannot supply that proof. Finding extraction needs
+Strict mode requires an independent live ACL provider. An explicitly approved
+CLI pilot can use live identity, destination, ancestry and publication checks within
+a fixed window of at most fourteen days. It cannot prove all sharing changes and
+never silently renews. A configuration flag cannot supply proof. Finding extraction needs
 an explicit isolated session route and a reviewed extractor. Supply your own private
 data source with `Name` title, `Payload` rich text and `Status` select properties.
 Remote memory operations enforce namespace and customer scope, provenance, bounded
@@ -86,3 +88,18 @@ See [RESULTS.md](RESULTS.md) for observed checks and [EXPERIMENT.md](EXPERIMENT.
 for the reproducible comparison protocol.
 
 No LinkedIn post or external message is sent by this project.
+
+The trusted `renewal.runtime:create` connector accepts byte-pinned source receipts,
+explicit namespace and scope routes, and reviewed canonical facts. It handles Claude
+and Codex message schemas without copying arbitrary transcript text. Changed sources
+are quarantined; adding another source requires explicit scope review. Maintenance
+only trashes expired recovery rows and never forgets active records from age alone.
+
+`renewal.activity` reads complete paginated Codex metadata over the documented local
+WebSocket control socket and Claude session status with process-start verification.
+It never starts, resumes or interrupts a thread. Unknown metadata, transport failures,
+active tasks and insufficient computer idle time defer mutations. Verify the local
+interface after Codex upgrades. The scheduler inherits the installation PATH and
+runs every five minutes while awake; the runner enforces the Singapore due time.
+Registration, invocation, useful work and a running pilot are separate observations.
+A full pilot cannot start unless its report precedes the configured policy expiry.

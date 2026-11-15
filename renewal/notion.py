@@ -1,7 +1,6 @@
-"""Remote authoritative Notion storage. No ACL API is assumed or inferred.
+"""Scoped Notion storage with strict ACL or explicitly approved CLI pilot policy.
 
-An independently implemented live ACL verifier is required for real operation.
-The public Pages API and a null public_url cannot supply that proof.
+The CLI pilot checks identity and destination, not complete sharing permissions.
 """
 import datetime as dt
 import hashlib
@@ -29,6 +28,22 @@ class NotionStore:
     def _privacy(self, resource=None):
         c = self.config
         resource = resource or c.get('data_source_id')
+        if c.get('privacy_policy') == 'cli_pilot':
+            try:
+                policy = c['pilot_access']
+                start = dt.datetime.fromisoformat(policy['approved_at'])
+                end = dt.datetime.fromisoformat(policy['expires_at'])
+                if (c.get('enabled') is not True or policy.get('approved') is not True
+                        or not start <= self.now() < end
+                        or not dt.timedelta(0) < end-start <= dt.timedelta(days=14)):
+                    raise PrivacyError('Approved live pilot window required')
+                if self.transport.verify_destination(resource) is not True:
+                    raise PrivacyError('CLI destination verification failed')
+            except (KeyError, ValueError, TypeError, AttributeError) as exc:
+                raise PrivacyError('CLI pilot identity and destination checks unavailable') from exc
+            return True
+        if c.get('privacy_policy', 'strict_acl') != 'strict_acl':
+            raise PrivacyError('Unknown privacy policy')
         if c.get('enabled') is not True or not resource or not callable(self.acl_verifier):
             raise PrivacyError('Private Notion integration or live ACL verifier unavailable')
         try:
@@ -149,10 +164,59 @@ class NtnTransport:
     """Existing ntn auth. Schema: Name title, Payload rich_text, Status select.
 
     Requests never log arguments, response bodies, credentials or content.
-    This transport is unusable without NotionStore's independent ACL verifier.
+    NotionStore enforces the selected policy before remote content operations.
     """
     def __init__(self, config):
         self.config = config
+
+    def verify_destination(self, resource):
+        """CLI-backed identity/ancestry checks, never described as complete ACL proof.
+
+        No credential or sharing mutation. Rechecks on each operation/record.
+        The user-approved pilot accepts incomplete sharing-change visibility.
+        """
+        c = self.config
+        try:
+            if not all(isinstance(c.get(k), str) and c[k] and '/' not in c[k]
+                       for k in ('account_email', 'workspace_id', 'setup_page_id',
+                                 'database_id', 'data_source_id')):
+                raise PrivacyError('Explicit account and destination identities required')
+            if not isinstance(resource, str) or not resource or '/' in resource:
+                raise PrivacyError('Invalid resource identity')
+            user = self._api('GET', 'v1/users/me')
+            bot = user['bot']
+            if (bot['workspace_id'] != c['workspace_id']
+                    or bot['owner']['type'] != 'user'
+                    or bot['owner']['user']['person']['email'] != c['account_email']):
+                raise PrivacyError('CLI account or workspace changed')
+            page = self._api('GET', 'v1/pages/'+c['setup_page_id'])
+            database = self._api('GET', 'v1/databases/'+c['database_id'])
+            source = self._api('GET', 'v1/data_sources/'+c['data_source_id'])
+            for obj, kind, expected in ((page, 'page', c['setup_page_id']),
+                                        (database, 'database', c['database_id']),
+                                        (source, 'data_source', c['data_source_id'])):
+                if (obj['id'] != expected or obj['object'] != kind
+                        or obj['in_trash'] is not False or obj.get('is_archived', False)
+                        or 'public_url' not in obj or obj['public_url'] is not None):
+                    raise PrivacyError('Destination unavailable or visibly published')
+            if (page['parent'] != {'type': 'workspace', 'workspace': True}
+                    or database['parent'] != {'type': 'page_id', 'page_id': c['setup_page_id']}
+                    or source['parent'] != {'type': 'database_id', 'database_id': c['database_id']}
+                    or c['data_source_id'] not in {v['id'] for v in database['data_sources']}):
+                raise PrivacyError('Destination ancestry changed')
+            if resource != c['data_source_id']:
+                row = self._api('GET', 'v1/pages/'+resource)
+                parent = row['parent']
+                if (row['id'] != resource or row['object'] != 'page'
+                        or row['in_trash'] is not False or row.get('is_archived', False)
+                        or 'public_url' not in row or row['public_url'] is not None
+                        or parent.get('type') != 'data_source_id'
+                        or parent.get('data_source_id') != c['data_source_id']
+                        or parent.get('database_id') != c['database_id']):
+                    raise PrivacyError('Record outside approved destination')
+        except (KeyError, ValueError, TypeError) as exc:
+            raise PrivacyError('Incomplete CLI identity or destination response') from exc
+        return True
 
     def _api(self, method, path, body=None):
         command = ['ntn', 'api', path, '-X', method]
@@ -298,10 +362,9 @@ class ReportSink:
 
 
 def create(config):
-    """Safe runtime factory until a supported live ACL provider is installed.
+    """Strict by default; CLI pilot requires explicit approved bounded config.
 
-    Config cannot assert verified_private or load arbitrary verifier code.
-    External code may construct NotionStore with an independently verified API.
+    Neither policy accepts a bare verified_private configuration assertion.
     """
     notion = config.get('notion', config)
     store = NotionStore(notion, NtnTransport(notion))
