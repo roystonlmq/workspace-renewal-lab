@@ -11,6 +11,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from renewal.ingestion import Ingestor
+from renewal.accounting import LedgerCostSummary
+from renewal.experiment import Ledger
 from renewal.nightly import Activity, LocalActivityCheck, NightlyRunner, build_configured_runner, launchd_template, register_scheduler
 from test_ingestion import NOW, claude, write_lines
 
@@ -96,6 +98,21 @@ class NightlyTests(unittest.TestCase):
         runner.readiness = {}
         self.assertEqual(runner.tick(self.paths, now=NOW)['status'], 'blocked_readiness')
         self.assertFalse((self.root / 'runtime' / 'pilot.json').exists())
+
+    def test_due_report_includes_failed_and_unfinished_calls_with_unknown_billing(self):
+        ledger=Ledger(self.root/'pilot-calls.jsonl')
+        key=ledger.begin({'harness':'synthetic'})
+        ledger.finish(key,status='failed',usage={'input_tokens':12})
+        ledger.begin({'harness':'synthetic'})
+        reports=[]
+        runner=self.runner(cost_summary=LedgerCostSummary([ledger.path]),
+                           report_sink=PrivateReport(lambda r: reports.append(r) or True))
+        runner.tick([],now=NOW)
+        self.assertEqual(runner.tick([],now=NOW+timedelta(days=14))['report_status'],'delivered')
+        self.assertEqual(reports[0]['costs']['paid_calls_recorded'],2)
+        self.assertEqual(reports[0]['costs']['unfinished_calls'],1)
+        self.assertIsNone(reports[0]['costs']['actual_charges'])
+        self.assertIsNone(reports[0]['average_observed_day_cost'])
 
     def test_improvement_attempt_is_reserved_before_crash_and_never_retried_same_day(self):
         attempts = []

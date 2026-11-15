@@ -79,7 +79,10 @@ class MemoryService:
     def forget(self, namespace, scope, key, *, evidence, confidence, confirmed=False):
         row = self.require(namespace, scope, key)
         theme_rule = self.store.get(namespace,scope,self.theme_key(row.get('theme','')),include_recovery=False)
-        if row.get('kind') == 'protected_preference' or not evidence or confidence < .95:
+        valid_confidence = type(confidence) in (int, float) and .95 <= confidence <= 1
+        valid_evidence = (isinstance(evidence, (list, tuple)) and bool(evidence)
+                          and all(isinstance(e, str) and e.strip() for e in evidence))
+        if row.get('kind') == 'protected_preference' or not valid_evidence or not valid_confidence:
             raise MemoryError('Obsolescence requires high-confidence evidence')
         if any('not retrieved' in e.casefold() or 'lack of retrieval' in e.casefold() for e in evidence):
             raise MemoryError('Non-use alone is not obsolescence evidence')

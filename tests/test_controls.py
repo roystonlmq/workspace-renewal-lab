@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from renewal.controls import ChangeGate, Rejected
+from renewal.controls import ChangeGate, Rejected, atomic_write
 
 
 class ControlsTest(unittest.TestCase):
@@ -64,3 +65,38 @@ class ControlsTest(unittest.TestCase):
         self.assertEqual(target.stat().st_mode & 0o777,0o755)
         self.gate.rollback(receipt)
         self.assertEqual(target.stat().st_mode & 0o777,0o755)
+
+    def test_failed_applied_receipt_restores_original_and_mode(self):
+        target = self.root / 'skills/example.md'
+        target.chmod(0o755)
+        def failing_result(path, data):
+            if Path(path).name == 'result.json':
+                raise OSError('synthetic receipt failure')
+            atomic_write(path, data)
+        with patch('renewal.controls.atomic_write', side_effect=failing_result):
+            with self.assertRaises(Rejected):
+                self.gate.apply('skills/example.md','candidate',lambda p:True)
+        self.assertEqual(target.read_text(),'original')
+        self.assertEqual(target.stat().st_mode & 0o777,0o755)
+
+    def test_failed_new_file_install_removes_only_own_change(self):
+        def failing_result(path, data):
+            if Path(path).name == 'result.json':
+                raise OSError('synthetic receipt failure')
+            atomic_write(path, data)
+        with patch('renewal.controls.atomic_write', side_effect=failing_result):
+            with self.assertRaises(Rejected):
+                self.gate.apply('skills/new.md','candidate',lambda p:True)
+        self.assertFalse((self.root / 'skills/new.md').exists())
+
+    def test_install_error_preserves_a_newer_concurrent_edit(self):
+        target = self.root / 'skills/example.md'
+        def concurrent_failure(path, data):
+            if Path(path).name == 'result.json':
+                target.write_text('newer edit')
+                raise OSError('synthetic receipt failure')
+            atomic_write(path, data)
+        with patch('renewal.controls.atomic_write', side_effect=concurrent_failure):
+            with self.assertRaises(Rejected):
+                self.gate.apply('skills/example.md','candidate',lambda p:True)
+        self.assertEqual(target.read_text(),'newer edit')

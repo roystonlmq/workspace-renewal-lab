@@ -98,3 +98,18 @@ class LifecycleTest(unittest.TestCase):
         self.add()
         with self.assertRaises(MemoryError):
             self.service.forget('work','synthetic-a','m1',evidence=['not retrieved in 90 days'],confidence=1)
+
+    def test_forgetting_rejects_invalid_confidence_without_changing_memory(self):
+        self.add()
+        for confidence in (float('nan'), float('inf'), 2, -1, True, 'high', None):
+            with self.subTest(confidence=confidence), self.assertRaises(MemoryError):
+                self.service.forget('work','synthetic-a','m1',
+                                    evidence=['superseded source'],confidence=confidence)
+            self.assertEqual(self.service.require('work','synthetic-a','m1')['status'],'active')
+
+    def test_forgetting_requires_nonempty_structured_evidence(self):
+        self.add()
+        for evidence in ('superseded source', [''], ['  '], [None]):
+            with self.subTest(evidence=evidence), self.assertRaises(MemoryError):
+                self.service.forget('work','synthetic-a','m1',evidence=evidence,confidence=1)
+            self.assertEqual(self.service.require('work','synthetic-a','m1')['status'],'active')

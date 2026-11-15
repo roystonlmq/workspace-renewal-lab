@@ -88,12 +88,30 @@ class ChangeGate:
             raise Rejected('Concurrent modification or active work')
         if (folder / 'candidate').read_bytes() != after:
             raise Rejected('Candidate changed during validation')
-        atomic_write(target, after)
-        target.chmod(original_mode)
-        atomic_write(folder / 'result.json', b'{"status":"applied"}')
+        try:
+            atomic_write(target, after)
+            target.chmod(original_mode)
+            atomic_write(folder / 'result.json', b'{"status":"applied"}')
+        except OSError as error:
+            # Installation can succeed before chmod or its receipt fails. Restore
+            # only our matching bytes, even when result storage is unavailable.
+            try:
+                self._restore(receipt)
+            except (OSError, Rejected) as recovery_error:
+                raise Rejected('Install failed; recovery requires conflict review') from recovery_error
+            try:
+                atomic_write(folder / 'result.json', b'{"status":"rolled_back","reason":"install_error"}')
+            except OSError:
+                pass  # Original, candidate and receipt still permit inspection.
+            raise Rejected('Install failed; original restored') from error
         return receipt
 
     def rollback(self, receipt):
+        self._restore(receipt)
+        folder = self.state / receipt['id']
+        atomic_write(folder / 'result.json', b'{"status":"rolled_back"}')
+
+    def _restore(self, receipt):
         target = self.target(receipt['path'])
         folder = self.state / receipt['id']
         saved = json.loads((folder / 'receipt.json').read_text())
@@ -107,4 +125,3 @@ class ChangeGate:
                 raise Rejected('Recovery copy failed integrity check')
             atomic_write(target, original)
             target.chmod(receipt['mode'])
-        atomic_write(folder / 'result.json', b'{"status":"rolled_back"}')

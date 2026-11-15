@@ -56,6 +56,24 @@ Example metadata for one reader-supplied call:
 The harness extracts an exposed `observed_model` from JSON events. If the provider
 does not expose it, preserve that uncertainty. Do not fill it with the requested name.
 
+For nightly reports, use dedicated pilot ledgers and configure:
+
+```json
+{
+  "accounting": {
+    "ledger_paths": ["/absolute/private/pilot-calls.jsonl"]
+  }
+}
+```
+
+Append verified billing through `Ledger.finish` with `actual_charge_usd`,
+`actual_charge_source` and `actual_charge_date`. Append a price estimate separately
+with `estimated_usd`, `pricing_source` and `pricing_date`. Both dates use ISO format.
+The read-only aggregator counts failed and unfinished attempts, reports known subtotals
+separately from unknown full costs and preserves evidence references. It neither
+fetches billing nor proves that every call was recorded. Do not put this private
+configuration, evidence references or real ledgers in a public repository.
+
 `fixtures/` contains only synthetic history for clear and resume experiments.
 `python3 -m renewal.eval --output /tmp/renewal-verification` exercises isolated
 memory, ingestion, due-report, archive and operational-change scenarios without

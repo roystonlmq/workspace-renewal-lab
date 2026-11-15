@@ -1,8 +1,15 @@
 # Observed results, 15/11/2026
 
-The protected deterministic evaluation passed 88 tests across 15 suites. It made
+The latest protected deterministic evaluation passed 102 tests across 16 suites. It made
 zero paid model calls. This establishes tested implementation behavior with synthetic
 fixtures. It does not establish production integration, future execution or savings.
+
+The continuation added recovery after installation/receipt failures, validation of
+forgetting confidence and structured evidence, and read-only pilot cost aggregation.
+Regression tests reproduced the safety gaps before fixes. The initial 88-test result
+remains separate from this expanded run. Cost reporting includes interrupted calls,
+unknown billing, dated cost evidence, conflicting duplicates and harness-specific
+token semantics. These checks made no model calls and do not establish a live pilot.
 
 Covered behavior includes both generated adapter commands and linked skill scripts,
 placement, archive restore, protected-control rejection, guarded apply and rollback,

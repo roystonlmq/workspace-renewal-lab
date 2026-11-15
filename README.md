@@ -29,6 +29,16 @@ The harness runner records the start before invoking a command, persists failure
 captures exposed token usage, and makes no retries. Supply your own authenticated
 harness, model, effort and permissions. Raw logs belong outside this repository.
 
+The nightly runner can read dedicated private ledgers through an `accounting`
+configuration with explicit absolute `ledger_paths` ending in `.jsonl`. Include evals,
+repairs and maintenance calls. `renewal.accounting.LedgerCostSummary` counts failed
+and unfinished calls, rejects conflicting duplicates and keeps unknown totals null.
+Actual charges require `actual_charge_source` and `actual_charge_date`; estimates
+require `pricing_source` and `pricing_date`. Dates use ISO format. Provider-reported
+costs remain separate. Token fields are grouped by harness because provider input
+semantics differ. Missing ledgers and unrecorded outer orchestration prevent complete
+spend claims. The reader never adds prices or treats unknown billing as zero.
+
 The private Notion transport requires your own credentials and fresh, complete ACL
 evidence. A null public URL is insufficient. No production local memory cache exists.
 The supplied factory stays disabled until a supported independent live ACL provider
@@ -50,6 +60,9 @@ The 14-day report path is tested using a synthetic clock. No live pilot or futur
 report is implied by this source package.
 
 Protected tests run before operational changes, and rollback rejects concurrent edits.
+Installation errors after replacing a file restore its original bytes and mode when
+the installed content still matches. Newer concurrent edits remain intact. If recovery
+storage fails, retain the original receipt and review the conflict before proceeding.
 `renewal.improvement.ImprovementPipeline` copies only approved inputs to a private
 candidate directory, makes at most one explicitly configured harness invocation,
 requires the frozen checks, applies one allowlisted patch and runs a postcheck.

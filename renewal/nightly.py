@@ -314,11 +314,18 @@ def build_configured_runner(config: dict, *, activity_check=None) -> NightlyRunn
         connectors = getattr(importlib.import_module(module), name)(config)
         if not isinstance(connectors, dict):
             raise ValueError('invalid connector factory')
+    cost_summary = connectors.get('cost_summary')
+    if cost_summary is None and config.get('accounting'):
+        if __package__:
+            from .accounting import create
+        else:
+            from renewal.accounting import create
+        cost_summary = create(config)
     return NightlyRunner(state_dir, Ingestor(state_dir / 'ingestion.json'),
         connectors.get('sink'), activity_check or LocalActivityCheck(),
         improvement=connectors.get('improvement'), report_sink=connectors.get('report_sink'),
         memory_maintenance=connectors.get('memory_maintenance'),
-        cost_summary=connectors.get('cost_summary'), readiness=config.get('readiness'))
+        cost_summary=cost_summary, readiness=config.get('readiness'))
 
 
 def _source_paths(config):
